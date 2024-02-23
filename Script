@@ -1,0 +1,139 @@
+#ESTE SCRIPT FOI CRIADO E PUBLICAOD POR SAMUEL AMORIM SILVA, UTILIZADO EM SUAS PUBLICAÇÕES DO CBMET 2023 e CBAGRO 2023
+
+#### IMPORTANDO BIBLIOTECAS PARA SER USADO ####
+#### NÃO ALTERAR NENHUMA LINHA NESTA PARTE ####
+import numpy as np
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import pandas as pd
+from google.colab import files
+from google.colab import drive
+from matplotlib.lines import MarkerStyle
+#Caminho do seu drive
+drive.mount('/content/drive')
+
+##### INSIRA 2 ARQUIVOS ##################
+##### EVAPOTRANSPIRAÇÃO REAL ET ###########
+##### EVAPO TRANSPIRACAO POTENCIAL PET ####
+files = files.upload()
+
+# AGORA ESTOU CHAMANDO OS ARQUIVOS( FORMATO CSV ) E INSERINDO EM UMA VARIAVEL
+# lembrar de alterar o nome da variavel.csv , a real forma do seu nome sempre aparece
+# na parte final do console do comando anterior, se atentar nesta parte
+
+df_et = pd.read_csv('ET_MSF_Mosaico.csv')
+df_pet = pd.read_csv('PET_MSF_Mosaico.csv')
+
+# MEU ARQUIVO DE PREC ESTA NO MEU DRIVE ENT ESTOU CHAMANDO ELE E CORRIGINDO OS VALORES E COLUNAS
+
+PREC_ASF = '/content/drive/My Drive/IC/IC23/teste/msf_mean_Prec_Samuel.csv'
+PREC_ASF_df = pd.read_csv(PREC_ASF,sep=";", names=['system:time_start', 'value'])
+PREC_ASF_df = PREC_ASF_df.drop([0])
+
+# PARA TRANSFORMAR OS 4 VALORES DIARIOS EM 1 VALOR MENSAL
+
+PREC_ASF_df['system:time_start'] = PREC_ASF_df['system:time_start'].astype(str).str.replace('X','')
+PREC_ASF_df['system:time_start'] = pd.to_datetime(PREC_ASF_df['system:time_start'])
+PREC_ASF_df = PREC_ASF_df.reset_index()
+
+# EQUAÇÃO DO INDICE DE ARIDEZ
+# 1. ALTERE O NOME DA PRIMEIRA VARIAVEL EX: df_pet E O NOME DA COLUNA
+# 2. SO ALTERE A PRECIPITAÇÃO SE MUDAR A REGIÃO HIDROGRAFICA EX: ASF
+# 3. ANTES DE RODAR ESTE PARTE DO SCRIPT, CONFIRA SE EXISTE A MESMA QUANTIDADE DE
+# LINHAS ENTRE AS VARIAVEIS df_variavel e PREC_VARIAVEL_df , para isso você pode usar print para verificar
+# o inincio da serie, o final, e a qnt de linhas retire o # das proximas duas linhas:
+#print(df_pet['Formação Campestre'])
+#print( PREC_ASF_df['value'])
+
+# EQ EVAPOTRANSPIRACAO POTENCIAL
+# para alterar o valor maximo da linha x altera > 10, 10 esse comando me diz que
+# valores maiores que 10 será substituido por 10
+potencialpetp = df_pet['Mosaico Agrícola'].astype(float)/ PREC_ASF_df['value'].astype(float)
+potencialpetp = potencialpetp.mask(potencialpetp > 10,10)
+
+# EQ EVAPORTRANSPIRACAO REAL
+# para alterar o valor maximo da linha x altera > 10, 10 esse comando me diz que
+# valores maiores que 10 será substituido por 10
+realetp= df_et['Mosaico Agrícola'].astype(float)/ PREC_ASF_df['value'].astype(float)
+realetp = realetp.mask(realetp > 1, 1)
+
+######################  EQ DA CURVA DE BUDYKO  + FU ############################
+# A parametrizacao1 sempre será 2.6 pois é o valor default da propria equacao
+# A parametrizacao2 deve ser altera para o valor que mais se assemelha aos valores
+# observador, geralmente o valor vai ser em torno dos 3.5 variando com a latitude
+################################################################################
+
+#### FU
+def calculofu(valor, w):
+  valor = (1 + valor - (1 + (valor)**w)**(1/w))
+  return valor
+#### AJUSTAR O VALOR AQUI ### O IDEAL É O QUE APRESENTE OS MENORES VALORES DESCRITO NA ESTATISCA NO FINAL DO SCRIPT
+FU = calculofu(potencialpetp, 3.5)
+FU_P = calculofu(potencialpetp, 2.6)
+
+### CRIANDO A EQUAÇÃO PARA A CURVA EXPONENCIAL, NÃO É NECESSARIO ALTERA NENHUMA VARIAVEL AQUI ###
+budyko = np.power((potencialpetp*np.tanh(1/potencialpetp)*(1-np.exp(-potencialpetp))),0.5)
+
+# LINHAS DE PARAMETRO COMO: WATER LIMIT, ENERGY LIMIT, NÃO É NECESSARIO ALTERA NENHUMA VARIAVEL AQUI #
+water_limit_y = 1+potencialpetp*0
+energy_limit_x = np.arange(0, 1.0001, 0.05)
+energy_limit_y = energy_limit_x
+#DESVIO PADRÃO (dpest 2.6 e novo)
+desvio_padrão_budyko = np.std(budyko)
+desvio_padrao_potencial = np.std(potencialpetp)
+desvio_padrao_fu = np.std(FU)
+desvio_padrao_real = np.std(realetp)
+
+DPbudyko=round(desvio_padrão_budyko,2)
+DPpotencial=round(desvio_padrao_potencial,2)
+DPfu=round(desvio_padrao_fu,2)
+DPreal=round(desvio_padrao_real,2)
+print("DESVIO PADRÃO BUDYKO= ", DPbudyko)
+print("DESVIO PADRÃO POTENCIAL= ", DPpotencial)
+print("DESVIO PADRÃO FU= ", DPfu)
+print("DESVIO PADRÃO REAL= ", DPreal)
+
+
+#Erro Médio Absoluto (mae)
+MAE1 = np.mean(np.abs(potencialpetp - budyko))
+MAE1=round(MAE1,2)
+MAE2 = np.mean(np.abs(potencialpetp - FU))
+MAE2=round(MAE2,2)
+print("Erro Médio Absoluto BUDYKO= ", MAE1)
+print("Erro Médio Absoluto FU= ", MAE2)
+
+#Erro Médio Quadrático (IBM)
+EQM1 = np.sqrt(np.mean((potencialpetp - budyko) ** 2))
+EQM1 =round(EQM1,2)
+EQM2 = np.sqrt(np.mean((potencialpetp - FU) ** 2))
+EQM2 =round(EQM2,2)
+print("Erro Médio Quadrático BUDYKO= ", EQM1)
+print("Erro Médio Quadrático FU= ", EQM2)
+
+####   FUNÇÃO PLOT , NÃO É NECESSARIO ALTERA NENHUMA VARIAVEL AQUI  - APENAS ESTILO CASO NECESSARIO ####
+# Parametros de  water limit, energy limit e o delimitador no valor 1
+
+plt.plot(energy_limit_y,energy_limit_x, c='red',linewidth = 0.7)
+plt.plot(potencialpetp,water_limit_y,c='blue',linewidth = 0.7,linestyle = '-')
+#plt.plot(y,x,linestyle='-.', c='black',label='_nolegend_',linewidth = 0.7)
+
+# Plot das curvas geradas neste script
+# apenas pode alterar:
+# marker = forma do ponto , c = cor , s= tamanho, linewidths = grossura do contorno
+# alpha = transparencia , edge color= cor do contorno
+
+plt.scatter(potencialpetp, FU,  marker='o', c='red',linewidths=0.5,edgecolor='black')
+plt.scatter(potencialpetp, FU_P,  marker='o', c='green',linewidths=0.5,edgecolor='black')
+plt.scatter(potencialpetp, budyko,  marker='o', c='blue',linewidths=0.5,edgecolor='black')
+plt.scatter(potencialpetp, realetp, marker= MarkerStyle('o', fillstyle = ('none')),c='black',linewidths=0.5,s=15)
+
+plt.ylabel("Evapotranspiração Real (ET/p)", fontsize=8,)
+plt.xlabel("Índice de Aridez (ETo/p)", fontsize=8,)
+
+### limitar começo e fim do eixo y e x respectivamente
+plt.xlim(0, 10)
+plt.ylim(0, 1.03)
+
+#### LEMBRAR DE ALTERAR O VALOR DE ω PARA O QUE VOCÊ DEFINIU NA PARAMETRIZACAO
+plt.title('Região Hidrográfica do Medio São Francisco', fontsize=11)
+plt.legend(["Energy Limit (E/P=1)","Water Limit (E/E=1)","Fu(ω)= 3,5","Fu(ω)= 2,6","Budyko","ET/p, ETo/p"], fontsize=8, loc='lower right',frameon=False)
